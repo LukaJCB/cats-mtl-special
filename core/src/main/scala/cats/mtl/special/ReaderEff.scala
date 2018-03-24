@@ -2,41 +2,38 @@ package cats.mtl.special
 
 import cats.data.Kleisli
 import cats.{Applicative, FlatMap, Monad}
-import cats.effect.{ConcurrentEffect, Concurrent, Effect, IO, Sync, Async, Fiber}
+import cats.effect.{Async, Concurrent, ConcurrentEffect, Effect, Fiber, IO, Sync}
 import cats.mtl.ApplicativeAsk
 import cats.syntax.all._
 
-class ReaderEff[F[_]: FlatMap, R, A]private[special](private[special] val value: F[A]) {
-
+private[special] sealed abstract class ReaderEffOps[F[_], R, A](val re: ReaderEff[F, R, A]) {
   def unsafeRun(r: R)(cb: Either[Throwable, A] => IO[Unit])(implicit F: Effect[F]): Unit =
-    F.runAsync(run(r))(cb).unsafeRunSync()
-
-  private[special] def run(r: R)(implicit F: Sync[F]): F[A] =
-    F.delay(ReaderEff.cell = r) *> value
-
-  def flatMap[B](f: A => ReaderEff[F, R, B]): ReaderEff[F, R, B] =
-    new ReaderEff(value.flatMap(f andThen (_.value)))
-
-  def map[B](f: A => B): ReaderEff[F, R, B] =
-    new ReaderEff(value.map(f))
+    F.runAsync(ReaderEff.run(re)(r))(cb).unsafeRunSync()
 
 }
 
 private[special] sealed trait ReaderEffFunctions {
+
+  private[special] def run[F[_], R, A](re: ReaderEff[F, R, A])(r: R)(implicit F: Sync[F]): F[A] =
+    F.delay(ReaderEff.cell = r) *> ReaderEff.unwrap(re)
+
   def apply[F[_]: Sync, R, A](f: R => F[A]): ReaderEff[F, R, A] =
-    new ReaderEff(ask[F, R].value.flatMap(f))
+    ReaderEff.create( ReaderEff.unwrap(ask[F, R]).flatMap(f))
 
   def ask[F[_]: Sync, R]: ReaderEff[F, R, R] =
-    new ReaderEff(Sync[F].delay(ReaderEff.cell.asInstanceOf[R]))
+    ReaderEff.create(Sync[F].delay(ReaderEff.cell.asInstanceOf[R]))
 
   def liftF[F[_]: FlatMap, R, A](x: F[A]): ReaderEff[F, R, A] =
-    new ReaderEff[F, R, A](x)
+    ReaderEff.create[F, R, A](x)
 
   def pure[F[_], R, A](x: A)(implicit F: Monad[F]): ReaderEff[F, R, A] =
-    new ReaderEff[F, R, A](F.pure(x))
+    ReaderEff.create[F, R, A](F.pure(x))
 
   def fromKleisli[F[_]: Sync, R, A](k: Kleisli[F, R, A]): ReaderEff[F, R, A] =
     apply(k.run)
+
+  def flatMap[F[_]: FlatMap, R, A, B](fa: ReaderEff[F, R, A])(f: A => ReaderEff[F, R, B]): ReaderEff[F, R, B] =
+    ReaderEff.create(ReaderEff.unwrap(fa).flatMap(f andThen  ReaderEff.unwrap))
 
   private[special] var cell: Any = _
 }
@@ -44,35 +41,38 @@ private[special] sealed trait ReaderEffFunctions {
 private[special] sealed abstract class ReaderEffInstances extends ReaderEffInstances0 {
 
   def effFiber[F[_]: FlatMap, R, A](f: Fiber[F, A]): Fiber[ReaderEff[F, R, ?], A] =
-    Fiber(new ReaderEff(f.join), new ReaderEff(f.cancel))
+    Fiber(ReaderEff.create(f.join), ReaderEff.create(f.cancel))
 
   implicit def concurrentEffectForReaderEff[F[_]: ConcurrentEffect, R]: ConcurrentEffect[ReaderEff[F, R, ?]] =
     new ConcurrentEffect[ReaderEff[F, R, ?]] {
       def tailRecM[A, B](a: A)(f: A => ReaderEff[F, R, Either[A, B]]): ReaderEff[F, R, B] =
-        new ReaderEff(Monad[F].tailRecM(a)(f andThen (_.value)))
+        ReaderEff.create(Monad[F].tailRecM(a)(f andThen ReaderEff.unwrap))
 
       def flatMap[A, B](fa: ReaderEff[F, R, A])(f: A => ReaderEff[F, R, B]): ReaderEff[F, R, B] =
-        fa.flatMap(f)
+        ReaderEff.flatMap(fa)(f)
 
-      def pure[A](x: A): ReaderEff[F, R, A] = new ReaderEff(Monad[F].pure(x))
+      override def map[A, B](fa: ReaderEff[F, R, A])(f: A => B): ReaderEff[F, R, B] =
+        ReaderEff.create(ReaderEff.unwrap(fa).map(f))
+
+      def pure[A](x: A): ReaderEff[F, R, A] = ReaderEff.create(Monad[F].pure(x))
 
       def handleErrorWith[A](fa: ReaderEff[F, R, A])(f: Throwable => ReaderEff[F, R, A]): ReaderEff[F, R, A] =
-        new ReaderEff[F, R, A](fa.value.handleErrorWith(f andThen (_.value)))
+        ReaderEff.create[F, R, A](ReaderEff.unwrap(fa).handleErrorWith(f andThen ReaderEff.unwrap))
 
       def raiseError[A](e: Throwable): ReaderEff[F, R, A] =
-        new ReaderEff[F, R, A](Sync[F].raiseError(e))
+        ReaderEff.create[F, R, A](Sync[F].raiseError(e))
 
       def async[A](k: (Either[Throwable, A] => Unit) => Unit): ReaderEff[F, R, A] =
-        new ReaderEff[F, R, A](Async[F].async(k))
+        ReaderEff.create[F, R, A](Async[F].async(k))
 
       def cancelable[A](k: (Either[Throwable, A] => Unit) => IO[Unit]): ReaderEff[F, R, A] =
-        new ReaderEff[F, R, A](Concurrent[F].cancelable(k))
+        ReaderEff.create[F, R, A](Concurrent[F].cancelable(k))
 
       def onCancelRaiseError[A](fa: ReaderEff[F, R, A], e: Throwable): ReaderEff[F, R, A] =
-        new ReaderEff[F, R, A](Concurrent[F].onCancelRaiseError(fa.value, e))
+        ReaderEff.create[F, R, A](Concurrent[F].onCancelRaiseError(ReaderEff.unwrap(fa), e))
 
       def racePair[A, B](fa: ReaderEff[F, R, A], fb: ReaderEff[F, R, B]): ReaderEff[F, R, Either[(A, Fiber[ReaderEff[F, R, ?], B]), (Fiber[ReaderEff[F, R, ?], A], B)]] =
-        new ReaderEff(Concurrent[F].racePair(fa.value, fb.value).map { e =>
+        ReaderEff.create(Concurrent[F].racePair(ReaderEff.unwrap(fa), ReaderEff.unwrap(fb)).map { e =>
           e.bimap({
             case (a, f) => (a, effFiber(f))
           }, {
@@ -81,19 +81,19 @@ private[special] sealed abstract class ReaderEffInstances extends ReaderEffInsta
         })
 
       def start[A](fa: ReaderEff[F, R, A]): ReaderEff[F, R, Fiber[ReaderEff[F, R, ?], A]] =
-        new ReaderEff(Concurrent[F].start(fa.value).map(f => effFiber(f)(ConcurrentEffect[F])))
+        ReaderEff.create(Concurrent[F].start(ReaderEff.unwrap(fa)).map(f => effFiber(f)(ConcurrentEffect[F])))
 
       def uncancelable[A](fa: ReaderEff[F, R, A]): ReaderEff[F, R, A] =
-        new ReaderEff[F, R, A](Concurrent[F].uncancelable(fa.value))
+        ReaderEff.create[F, R, A](Concurrent[F].uncancelable(ReaderEff.unwrap(fa)))
 
       def runCancelable[A](fa: ReaderEff[F, R, A])(cb: Either[Throwable, A] => IO[Unit]): IO[IO[Unit]] =
-        ConcurrentEffect[F].runCancelable(fa.value)(cb)
+        ConcurrentEffect[F].runCancelable(ReaderEff.unwrap(fa))(cb)
 
       def runAsync[A](fa: ReaderEff[F, R, A])(cb: Either[Throwable, A] => IO[Unit]): IO[Unit] =
-        Effect[F].runAsync(fa.value)(cb)
+        Effect[F].runAsync(ReaderEff.unwrap(fa))(cb)
 
       def suspend[A](thunk: => ReaderEff[F, R, A]): ReaderEff[F, R, A] =
-        new ReaderEff[F, R, A](Sync[F].suspend(thunk.value))
+        ReaderEff.create[F, R, A](Sync[F].suspend(ReaderEff.unwrap(thunk)))
 
     }
 
@@ -104,12 +104,12 @@ private[special] sealed abstract class ReaderEffInstances0 {
   implicit def monadForReaderEff[F[_]: Monad, R]: Monad[ReaderEff[F, R, ?]] =
     new Monad[ReaderEff[F, R, ?]] {
       def tailRecM[A, B](a: A)(f: A => ReaderEff[F, R, Either[A, B]]): ReaderEff[F, R, B] =
-        new ReaderEff(Monad[F].tailRecM(a)(f andThen (_.value)))
+        ReaderEff.create(Monad[F].tailRecM(a)(f andThen ReaderEff.unwrap))
 
       def flatMap[A, B](fa: ReaderEff[F, R, A])(f: A => ReaderEff[F, R, B]): ReaderEff[F, R, B] =
-        fa.flatMap(f)
+        ReaderEff.flatMap(fa)(f)
 
-      def pure[A](x: A): ReaderEff[F, R, A] = new ReaderEff(Monad[F].pure(x))
+      def pure[A](x: A): ReaderEff[F, R, A] = ReaderEff.create(Monad[F].pure(x))
     }
 
   implicit def applicativeAskForReaderEff[F[_]: Sync, R]: ApplicativeAsk[ReaderEff[F, R, ?], R] =
@@ -122,7 +122,15 @@ private[special] sealed abstract class ReaderEffInstances0 {
     }
 }
 
-object ReaderEff extends ReaderEffInstances0 with ReaderEffFunctions {
+object ReaderEff extends ReaderEffInstances0 with ReaderEffFunctions with NewtypeK2 {
 
+  private[cats] def create[F[_], E, A](s: F[A]): Type[F, E, A] =
+    s.asInstanceOf[Type[F, E, A]]
+
+  private[cats] def unwrap[F[_], E, A](e: Type[F, E, A]): F[A] =
+    e.asInstanceOf[F[A]]
+
+  implicit def readerEffOps[F[_], R, A](re: ReaderEff[F, R, A]): ReaderEffOps[F, R, A] =
+    new ReaderEffOps[F, R, A](re) {}
 
 }

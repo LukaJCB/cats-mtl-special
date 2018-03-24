@@ -3,7 +3,7 @@ package tests
 
 import cats.Eq
 import cats.tests.CatsSuite
-import cats.mtl.laws.discipline.{ApplicativeAskTests}
+import cats.mtl.laws.discipline.ApplicativeAskTests
 import cats.effect._
 import cats.effect.laws.util.{TestContext, TestInstances}
 import cats.effect.laws.discipline.arbitrary.catsEffectLawsArbitraryForIO
@@ -14,7 +14,7 @@ class ReaderEffSuite extends CatsSuite {
   implicit val testContext: TestContext = TestContext()
 
   implicit def eqReaderEffIO[A: Eq]: Eq[ReaderEff[IO, Int, A]] =
-    TestInstances.eqIO[A].imap(ReaderEff.liftF[IO, Int, A])(re => re.run(123))
+    TestInstances.eqIO[A].imap(ReaderEff.liftF[IO, Int, A])(re => ReaderEff.run(re)(123))
 
   implicit def arbitraryReaderEffIO[R, A: Arbitrary: Cogen]: Arbitrary[ReaderEff[IO, R, A]] =
     Arbitrary(Gen.oneOf(
