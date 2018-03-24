@@ -2,6 +2,7 @@ package cats.mtl.special
 
 import cats.{Monad, MonadError}
 import cats.effect._
+import cats.mtl.special.EitherEff.{LeftPartiallyApplied, LeftTPartiallyApplied, PurePartiallyApplied, RightPartiallyApplied, create, embed}
 import cats.syntax.all._
 
 
@@ -17,21 +18,7 @@ private[special] sealed abstract class EitherEffOps[F[_], E, A](val ee: EitherEf
   def embed: F[A] = EitherEff.embed(ee)
 }
 
-object EitherEff extends NewtypeK2 {
-
-  private[cats] def create[F[_], E, A](s: F[A]): Type[F, E, A] =
-    s.asInstanceOf[Type[F, E, A]]
-
-
-  private[cats] def embed[F[_], E, A](e: Type[F, E, A]): F[A] =
-    e.asInstanceOf[F[A]]
-
-  implicit def eitherEffOps[F[_], E, A](e: EitherEff[F, E, A])
-                                       (implicit F0: MonadError[F, Throwable]): EitherEffOps[F, E, A] =
-    new EitherEffOps[F, E, A](e) { implicit val F: MonadError[F, Throwable] = F0 }
-
-  private[special] case class CustomException[E](e: E) extends Exception
-
+private[special] sealed trait EitherEffFunctions {
   def handleErrorWith[F[_], E, A](fa: EitherEff[F, E, A])
                                  (f: E => EitherEff[F, E, A])
                                  (implicit F: MonadError[F, Throwable]): EitherEff[F, E, A] =
@@ -54,8 +41,10 @@ object EitherEff extends NewtypeK2 {
 
   def liftF[F[_], E, A](fa: F[A])(implicit F: MonadError[F, Throwable]): EitherEff[F, E, A] =
     rightT[E](fa)
+}
 
-  implicit def catsMtlSpecialConcurrentForEitherEff[F[_]: Effect, E]: Effect[EitherEff[F, E, ?]] =
+private[special] sealed abstract class EitherEffInstances extends EitherEffInstances0 {
+  implicit def catsMtlSpecialEffectForEitherEff[F[_]: Effect, E]: Effect[EitherEff[F, E, ?]] =
     new Effect[EitherEff[F, E, ?]] {
       def pure[A](x: A): EitherEff[F, E, A] = EitherEff.pure[F, E](x)
 
@@ -81,8 +70,9 @@ object EitherEff extends NewtypeK2 {
         create(Sync[F].suspend(embed(thunk)))
 
     }
+}
 
-
+private[special] sealed abstract class EitherEffInstances0 {
   implicit def catsMtlSpecialMonadErrorForEitherEff[F[_], E](implicit F: MonadError[F, Throwable]): MonadError[EitherEff[F, E, ?], E] =
     new MonadError[EitherEff[F, E, ?], E] {
       def raiseError[A](e: E): EitherEff[F, E, A] = EitherEff.leftT[F, A](e)
@@ -98,6 +88,22 @@ object EitherEff extends NewtypeK2 {
       def tailRecM[A, B](a: A)(f: A => EitherEff[F, E, Either[A, B]]): EitherEff[F, E, B] =
         create(F.tailRecM(a)(f andThen embed))
     }
+}
+
+object EitherEff extends EitherEffInstances with NewtypeK2 with EitherEffFunctions {
+
+  private[cats] def create[F[_], E, A](s: F[A]): Type[F, E, A] =
+    s.asInstanceOf[Type[F, E, A]]
+
+  private[cats] def embed[F[_], E, A](e: Type[F, E, A]): F[A] =
+    e.asInstanceOf[F[A]]
+
+  implicit def eitherEffOps[F[_], E, A](e: EitherEff[F, E, A])
+                                       (implicit F0: MonadError[F, Throwable]): EitherEffOps[F, E, A] =
+    new EitherEffOps[F, E, A](e) { implicit val F: MonadError[F, Throwable] = F0 }
+
+  private[special] case class CustomException[E](e: E) extends Exception
+
 
   private[special] final class LeftPartiallyApplied[B](val dummy: Boolean = true) extends AnyVal {
     def apply[F[_], A](fa: F[A])(implicit F: MonadError[F, Throwable]): EitherEff[F, A, B] =
@@ -118,4 +124,5 @@ object EitherEff extends NewtypeK2 {
     def apply[F[_], B](fb: F[B])(implicit F: MonadError[F, Throwable]): EitherEff[F, A, B] =
       create(fb)
   }
+
 }

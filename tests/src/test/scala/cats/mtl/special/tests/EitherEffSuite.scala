@@ -2,6 +2,7 @@ package cats.mtl.special.tests
 
 import cats.Eq
 import cats.effect.IO
+import cats.effect.laws.discipline.EffectTests
 import cats.tests.CatsSuite
 import cats.effect.laws.discipline.arbitrary.catsEffectLawsArbitraryForIO
 import cats.effect.laws.util.{TestContext, TestInstances}
@@ -20,8 +21,11 @@ class EitherEffSuite extends CatsSuite {
 
   implicit val testContext: TestContext = TestContext()
 
+  implicit def eqIO[A: Eq] =
+    TestInstances.eqIO[A]
+
   implicit def eqEitherEffIO[A: Eq, E]: Eq[EitherEff[IO, E, A]] =
-    TestInstances.eqIO[A].imap(EitherEff.liftF[IO, E, A])(_.embed)
+    eqIO[A].imap(EitherEff.liftF[IO, E, A])(_.embed)
 
   implicit def arbitraryEitherEffIO[E: Arbitrary, A: Arbitrary: Cogen]: Arbitrary[EitherEff[IO, E, A]] =
     Arbitrary(Gen.oneOf(
@@ -32,7 +36,7 @@ class EitherEffSuite extends CatsSuite {
   checkAll("MonadError[EitherEff[IO, String, ?], String]",
     MonadErrorTests[EitherEff[IO, String, ?], String].monadError[Int, String, Int])
 
-  checkAll("MonadError[EitherEff[IO, String, ?], Throwable]",
-    MonadErrorTests[EitherEff[IO, String, ?], Throwable].monadError[Int, String, Int])
+  checkAll("Effect[EitherEff[IO, String, ?]]",
+    EffectTests[EitherEff[IO, String, ?]].effect[Int, String, Int])
 
 }

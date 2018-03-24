@@ -122,7 +122,7 @@ private[special] sealed abstract class ReaderEffInstances0 {
     }
 }
 
-object ReaderEff extends ReaderEffInstances0 with ReaderEffFunctions with NewtypeK2 {
+object ReaderEff extends ReaderEffInstances with ReaderEffFunctions with NewtypeK2 {
 
   private[cats] def create[F[_], E, A](s: F[A]): Type[F, E, A] =
     s.asInstanceOf[Type[F, E, A]]
