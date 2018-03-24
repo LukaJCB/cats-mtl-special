@@ -9,12 +9,11 @@ import cats.effect.laws.util.{TestContext, TestInstances}
 import cats.effect.laws.discipline.arbitrary.catsEffectLawsArbitraryForIO
 import org.scalacheck.{Arbitrary, Cogen, Gen}
 
-class CatsMtlSpecialSuite extends CatsSuite {
-
+class ReaderEffSuite extends CatsSuite {
 
   implicit val testContext: TestContext = TestContext()
 
-  implicit def eqUIO[A: Eq]: Eq[ReaderEff[IO, Int, A]] =
+  implicit def eqReaderEffIO[A: Eq]: Eq[ReaderEff[IO, Int, A]] =
     TestInstances.eqIO[A].imap(ReaderEff.liftF[IO, Int, A])(re => re.run(123))
 
   implicit def arbitraryReaderEffIO[R, A: Arbitrary: Cogen]: Arbitrary[ReaderEff[IO, R, A]] =
