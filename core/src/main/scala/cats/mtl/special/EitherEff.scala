@@ -1,8 +1,9 @@
 package cats.mtl.special
 
+import cats.data.EitherT
 import cats.{Monad, MonadError}
 import cats.effect._
-import cats.mtl.special.EitherEff.{LeftPartiallyApplied, LeftTPartiallyApplied, PurePartiallyApplied, RightPartiallyApplied, create, embed}
+import cats.mtl.special.EitherEff.{CustomException, LeftPartiallyApplied, LeftTPartiallyApplied, PurePartiallyApplied, RightPartiallyApplied, create, embed}
 import cats.syntax.all._
 
 
@@ -16,6 +17,8 @@ private[special] sealed abstract class EitherEffOps[F[_], E, A](val ee: EitherEf
   }.rethrow
 
   def embed: F[A] = EitherEff.embed(ee)
+
+  def toEitherT: EitherT[F, E, A] = EitherT(ee.value)
 }
 
 private[special] sealed trait EitherEffFunctions {
@@ -38,6 +41,12 @@ private[special] sealed trait EitherEffFunctions {
   final def rightT[E]: RightPartiallyApplied[E] = new RightPartiallyApplied[E]
 
   def raiseError[F[_], A]: LeftTPartiallyApplied[F, A] = leftT[F, A]
+
+  def apply[F[_], E, A](fea: F[Either[E, A]])(implicit F: MonadError[F, Throwable]): EitherEff[F, E, A] =
+    create(F.rethrow(fea.map(_.leftMap(e => new CustomException(e): Throwable))))
+
+  def fromEitherT[F[_], E, A](et: EitherT[F, E, A])(implicit F: MonadError[F, Throwable]): EitherEff[F, E, A] =
+    create(F.rethrow(et.leftMap(e => new CustomException(e): Throwable).value))
 
   def liftF[F[_], E, A](fa: F[A])(implicit F: MonadError[F, Throwable]): EitherEff[F, E, A] =
     rightT[E](fa)
